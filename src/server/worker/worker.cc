@@ -23,6 +23,10 @@ namespace Tenvoy {
 
         void read_cb(struct bufferevent* bev, void* arg) {
             printf("read_cb\n");
+            char buf[256];
+            memset((void*)buf, 0, sizeof(buf));
+            bufferevent_read(bev, (void*)buf, sizeof(buf));
+            bufferevent_write(bev, (const void*)buf, sizeof(buf));
         }
 
         void write_cb(struct bufferevent* bev, void* arg) {
@@ -69,7 +73,7 @@ namespace Tenvoy {
             printf("hello from worker %d\n", this->id);
 
             struct event* event;
-            struct timeval one_sec = {1, 0};
+            struct timeval ten_sec = {10, 0};
 
             evconnlistener_new(this->event_base, worker_listener_callback, this, 0/*flags*/, -1/*backlog*/, this->listen_fd);
 
@@ -77,7 +81,7 @@ namespace Tenvoy {
                 Worker* worker = static_cast<Worker*>(arg);
                 printf("event triggered on worker %d on fd %d, ev %x\n", worker->id, fd, what);
             }, this);
-            event_add(event, &one_sec);
+            event_add(event, &ten_sec);
 
             event_base_dispatch(this->event_base);
 
