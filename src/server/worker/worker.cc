@@ -26,6 +26,12 @@ namespace Tenvoy {
             char buf[256];
             memset((void*)buf, 0, sizeof(buf));
             bufferevent_read(bev, (void*)buf, sizeof(buf));
+            for (int i = 0; i < 256; i++) {
+                if (buf[i] == '\n') {
+                    break;
+                }
+                buf[i] = buf[i]+1;
+            }
             bufferevent_write(bev, (const void*)buf, sizeof(buf));
         }
 
@@ -50,7 +56,6 @@ namespace Tenvoy {
             bufferevent_enable(bev, EV_READ);
         }
 
-
         Worker::Worker(int id, int listen_fd) {
             this->event_base = event_base_new();
             if (event_base == nullptr) {
@@ -73,13 +78,13 @@ namespace Tenvoy {
             printf("hello from worker %d\n", this->id);
 
             struct event* event;
-            struct timeval ten_sec = {10, 0};
+            struct timeval ten_sec = {60, 0};
 
             evconnlistener_new(this->event_base, worker_listener_callback, this, 0/*flags*/, -1/*backlog*/, this->listen_fd);
 
             event = event_new(this->event_base, 0, EV_TIMEOUT|EV_PERSIST, [](evutil_socket_t fd, short what, void* arg) -> void {
                 Worker* worker = static_cast<Worker*>(arg);
-                printf("event triggered on worker %d on fd %d, ev %x\n", worker->id, fd, what);
+                printf("timer event triggered on worker %d on fd %d, ev %x\n", worker->id, fd, what);
             }, this);
             event_add(event, &ten_sec);
 
