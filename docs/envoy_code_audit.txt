@@ -1,0 +1,145 @@
+
+compile with debug symbols:
+bazel build --spawn_strategy=standalone --compilation_mode=dbg --action_env=PATH="/usr/local/bin:/opt/local/bin:/usr/bin:/bin" //source/exe:envoy-static
+
+generate .dSYM:
+dsymutil <envoy-static> -o <envoy-static>.dSYM
+
+view dwarf file:
+dwarfdump envoy-static.dSYM/Contents/Resources/DWARF/envoy-static | less
+
+
+https://blog.envoyproxy.io/external-c-dependency-management-in-bazel-dd37477422f5
+
+
+
+Source code:
+
+TODO:
+  - how does destination_port_map get populated in the first place?
+    - A: see ListenerImpl::addOrUpdateListener
+  - how does this whole setup map to static/dynamic config schema?
+TODO:
+  - what is a filter_chain exactly?
+
+
+ListenerImpl::ListenerImpl(config, socket)
+	- setupServerSocket(dispatcher, config)
+		- evconnlistener_new(dispatcher->event_base, listenCallback, socket)
+
+
+ListenerImpl::listenCallback(conn_fd)
+	- s = new AcceptedSocketImpl(conn_fd)
+	- this->onAccept(accepted_socket)
+		- config.FilterChainManagerImpl.findFilterChain(accepted_socket)
+		- newConnection(accepted_socket)
+			- transport_socket = accepted_socket.filterChain.createTransportSocket()
+			- dispatcher.createServerConnection(accepted_socket, transport_socket)
+		
+
+ListenerManagerImpl::addOrUpdateListener(listener_config)
+  - existing_listener = block_updates_for_existing_listeners_if_any(listener_config)
+  - new_listener = ListenerImpl(listener_config)
+  - if (existing_listener):
+    - new_listener.setSocket(existing.getSocket())
+  - else:
+    - handle draining // some magic here
+    - new_listener.setSocket(createListenSocket())
+
+
+FilterChainManagerImpl::findFilterChain(socket)
+  - destination_port_map = get()
+  - addr_map = destination_port_map[socket.port()]
+  - server_name_map = addr_map[socket.addr()]
+  - transport_protocol_map = server_name_map[socket.server_name()]
+  - application_protocol_map = transport_protocol_map[socket.transport_protocol()]
+  - source_type_array = application_protocol_map[socket.application_protocol()]
+  - filter_chain = source_type_array[socket.source_type()]  // source_type is one of local/external/any
+
+
+FilterChainManagerImpl::addFilterChain(port, ip, server_name, transport_protocl, application_protocol, source_type):
+  - filter_chain = new()
+  - insert(destination_port_map, args..., filter_chain) // on reverse order of the above find operation
+
+
+Server::InstanceImpl
+	- has:
+		- dispatcher_ DispatcherImpl*
+		- listener_manager_ ListenerManagerImpl*
+	- can:
+
+
+ListenerManagerImpl
+	- has:
+		- workers_ List<WorkerImpl*>
+	- can:
+
+
+WorkerImpl
+	- has:
+		- dispatcher_ DispatcherImpl*
+		- handler_ ConnectionHandlerImpl*
+		- thread_ ThreadImplPosix*
+	- can:
+
+
+ConnectionHandlerImpl
+	- has:
+		- dispatcher_ DispatcherImpl* // the same dispatcher as the parent(WorkerImpl)'s dispatcher
+		- listeners_ List<ActiveListenerBase>
+	- can:
+
+
+DispatcherImpl
+	- has:
+		- scheduler_ event_base*
+		- post_timer_ // a timer object based on the scheduler that allows adding timer events to be event_base*
+		- post_callbacks_ // functions to be invoked by timer
+	- can:
+		- post(f)
+			- Accept functions (usually from other threads) to be run by the dispatcher's event loop
+			- Essentially takes a lock and puts the function into post_callbacks_ and then call event_active. Note this is calling
+				event_active from a thread different from the thread who called event_base_dispatch(). This is relying on libevent
+				being thread-safe, in particular Envoy calls evthread_use_pthreads()
+		- createTimer(cb)
+			- creates timer event to be called
+		- createClientConnection(socket, transport_socket) /
+			createServerConnection(socket, transport_socket) /
+			createListener(socket) /
+			- All of these basically performs event_add() to add the event_base
+			- See more detail in seperate section
+
+
+DispatcherImpl::create[Client/Server]Connection(socket, transport_socket) -> ConnectionImpl
+	- connection = ConnectionImpl(this)
+	- connection->file_event = this.createFileEvent(socket->fd(), onFileEvent)
+		- event = new FileEventImpl()
+		- assignEvent(event.raw_event, dispatcher->base, onFileEvent)
+		- event_add(event.raw_event)
+	- return connection
+
+
+ConnectionImpl
+	- has:
+		- socket_
+		- transport_socket_
+		- filter_manager_
+		- read_buffer_
+		- write_buffer_
+
+
+ConnectionImpl::onFileEvent(events)
+	- switch(events)
+		- this->onReadRead()
+			- transport_socket->doRead(read_buffer_)
+		- this->onWriteReady()
+			- transport_socket->doWrite(write_buffer_)
+		- this->onClose()
+
+
+TransportSocket (virtual)
+
+
+
+
+
