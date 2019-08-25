@@ -4,3 +4,4 @@ bazel-genfiles
 bazel-out
 bazel-tenvoy
 bazel-testlogs
+.clwb
